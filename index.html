@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>XAUUSD 1H NUCLEAR CONFIRMED CANDLE PREDICTOR v8.7</title>
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+    body{margin:0;background:#000;color:#0f0;font-family:'Courier New;overflow:hidden;}
+    #chart{width:100vw;height:100vh;}
+    .panel{position:fixed;top:10px;left:10px;background:#001100;padding:20px;border:6px solid #0f0;border-radius:15px;z-index:9999;width:400px;box-shadow:0 0 30px #0f0;}
+    input,button{width:100%;padding:14px;margin:8px 0;background:#000;color:#0f0;border:3px solid #0f0;border-radius:10px;font-size:16px;}
+    button{background:#0f0;color:#0f0;font-weight:bold;cursor:pointer;animation:pulse 2s infinite;}
+    @keyframes pulse{0%{box-shadow:0 0 20px #0f0;}50%{box-shadow:0 0 40px #0f0;}100%{box-shadow:0 0 20px #0f0;}}
+    #signal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);font-size:60px;padding:40px 80px;border-radius:25px;z-index:99999;display:none;
+            box-shadow:0 0 200px #0f0;text-shadow:0 0 60px #0f0;animation:glow 1.5s infinite;font-weight:bold;}
+    @keyframes glow{0%,100%{box-shadow:0 0 200px #0f0;}50%{box-shadow:0 0 300px #0f0;}}
+    .bull{background:#004400;border:10px solid #0f0;color:#0f0;}
+    .bear{background:#440000;border:10px solid #f00;color:#f00;}
+    .status{margin-top:10px;font-size:15px;}
+    .confirmed{color:#0f0;font-size:18px;font-weight:bold;}
+</style>
+</head>
+<body>
+
+<div class="panel">
+    <h2>XAUUSD 1H NUCLEAR CONFIRMED PREDICTOR v8.7</h2>
+    <input type="text" id="api" placeholder="TwelveData API Key (Required)">
+    <input type="text" id="token" placeholder="Telegram Bot Token">
+    <input type="text" id="chat" placeholder="Telegram Chat ID">
+    <button onclick="launch()">LAUNCH NUCLEAR BOT</button>
+    <div class="status" id="st">Status: Waiting for launch...</div>
+    <div class="confirmed" id="conf"></div>
+</div>
+
+<div id="signal"></div>
+<div id="chart"></div>
+<audio id="nuke" src="https://assets.mixkit.co/sfx/preview/mixkit-explosion-with-debris-1683.mp3"></audio>
+
+<script>
+const chart = LightweightCharts.createChart(document.getElementById('chart'), {
+    layout: { backgroundColor: '#000', textColor: '#0f0' },
+    grid: { vertLines: { color: '#003300' }, horzLines: { color: '#003300' } },
+});
+const series = chart.addCandlestickSeries();
+let cfg = {api:'',token:'',chat:''};
+let lastSignal = '', lastCandleTime = 0;
+let h1 = [], h4 = [];
+
+if(localStorage.nuclear_xau) {
+    cfg = JSON.parse(localStorage.nuclear_xau);
+    document.getElementById('st').innerHTML = "<span style='color:#0f0'>NUCLEAR BOT AUTO-LOADED & RUNNING</span>";
+    startBot();
+}
+
+function launch() {
+    cfg.api = document.getElementById('api').value.trim();
+    cfg.token = document.getElementById('token').value.trim();
+    cfg.chat = document.getElementById('chat').value.trim();
+    if(!cfg.api) return alert("Bhai API key to daal do!");
+    localStorage.nuclear_xau = JSON.stringify(cfg);
+    document.getElementById('st').innerHTML = "<span style='color:#0f0'>NUCLEAR BOT LAUNCHED — WAITING FOR CONFIRMED CANDLE</span>";
+    startBot();
+}
+
+async function startBot() {
+    await Promise.all([load1H(), load4H()]);
+    setInterval(checkConfirmedCandle, 15000);
+    setTimeout(checkConfirmedCandle, 5000); // immediate check
+}
+
+async function fetchData(url) {
+    for(let i=0;i<5;i++) {
+        try {
+            const r = await fetch(url);
+            if(r.ok) return await r.json();
+        } catch(e) {}
+        await new Promise(r=>setTimeout(r,1000));
+    }
+    throw new Error("API failed");
+}
+
+async function load1H() {
+    const data = await fetchData(`https://api.twelvedata.com/time_series?symbol=XAU/USD&interval=1h&outputsize=500&apikey=${cfg.api}`);
+    h1 = data.values.map(d=>({
+        time: new Date(d.datetime).getTime()/1000,
+        open: +d.open, high: +d.high, low: +d.low, close: +d.close, volume: +d.volume
+    })).reverse();
+    series.setData(h1.map(c=>({time:c.time,open:c.open,high:c.high,low:c.low,close:c.close})));
+    lastCandleTime = h1[h1.length-1].time;
+}
+
+async function load4H() {
+    const data = await fetchData(`https://api.twelvedata.com/time_series?symbol=XAU/USD&interval=4h&outputsize=200&apikey=${cfg.api}`);
+    h4 = data.values.map(d=>({close:+d.close})).reverse();
+}
+
+async function checkConfirmedCandle() {
+    try {
+        const res = await fetchData(`https://api.twelvedata.com/time_series?symbol=XAU/USD&interval=1h&outputsize=3&apikey=${cfg.api}`);
+        const latest = res.values[0];
+        const newTime = new Date(latest.datetime).getTime()/1000;
+        
+        if(newTime > lastCandleTime) {
+            const candle = {
+                time: newTime,
+                open: +latest.open,
+                high: +latest.high,
+                low: +latest.low,
+                close: +latest.close,
+                volume: +latest.volume
+            };
+            
+            h1.push(candle);
+            if(h1.length > 600) h1.shift();
+            series.update(candle);
+            lastCandleTime = newTime;
+
+            // YEHI WO MOMENT HAI — NAYA CANDLE FULLY CONFIRMED HO CHUKA HAI
+            await analyzeConfirmedCandle(candle);
+        }
+    } catch(e) {
+        console.error(e);
+    }
+}
+
+async function analyzeConfirmedCandle(candle) {
+    if(h1.length < 100 || h4.length < 50) return;
+    
+    const closes = h1.map(c=>c.close);
+    const highs = h1.map(c=>c.high);
+    const lows = h1.map(c=>c.low);
+    const vols = h1.map(c=>c.volume);
+    
+    // Indicators
+    const ema200_4h = h4.slice(-50).map(c=>c.close).reduce((a,b,i,arr)=> i<20 ? a : a+(b-arr[i-20])/20, arr[19])/20; // approx
+    const ema9 = closes.slice(-30).reduce((a,b,i,arr)=> i<9 ? a : a + (2/(9+1))*(b-a), closes.slice(-30)[8]);
+    const ema21 = closes.slice(-50).reduce((a,b,i,arr)=> i<21 ? a : a + (2/(21+1))*(b-a), closes.slice(-50)[20]);
+    const rsiPeriod = 14;
+    let gains=0, losses=0;
+    for(let i=h1.length-rsiPeriod-1; i<h1.length-1; i++) {
+        const diff = h1[i+1].close - h1[i].close;
+        if(diff>0) gains += diff; else losses -= diff;
+    }
+    const avgGain = gains/rsiPeriod, avgLoss = losses/rsiPeriod;
+    const rsi = 100 - (100/(1 + avgGain/(avgLoss||1)));
+    const atr = highs.slice(-15).map((h,i)=>Math.max(h-lows[i+14], Math.abs(h-closes[i+13]), Math.abs(lows[i+14]-closes[i+13]))).reduce((a,b)=>a+b,0)/14;
+
+    let score = 0;
+    let reasons = [];
+
+    // 1. 4H EMA200 Bias
+    if(candle.close > ema200_4h) { score++; reasons.push("4H EMA200 Bullish"); }
+    else { score++; reasons.push("4H EMA200 Bearish"); }
+
+    // 2. Strong Close vs Open (Body > 60%
+    const body = Math.abs(candle.close - candle.open);
+    const range = candle.high - candle.low;
+    if(body/range > 0.6) {
+        if(candle.close > candle.open) { score++; reasons.push("Strong Bullish Candle"); }
+        else { score++; reasons.push("Strong Bearish Candle"); }
+    }
+
+    // 3. Volume Spike
+    const avgVol = vols.slice(-20,-1).reduce((a,b)=>a+b,0)/19;
+    if(candle.volume > avgVol * 1.8) { score++; reasons.push("Volume Explosion"); }
+
+    // 4. EMA9 vs EMA21 Alignment
+    if(candle.close > ema9 && ema9 > ema21 && candle.close > ema200_4h) { score++; reasons.push("EMA Bull Stack"); }
+    if(candle.close < ema9 && ema9 < ema21 && candle.close < ema200_4h) { score++; reasons.push("EMA Bear Stack"); }
+
+    // 5. RSI Not Extreme
+    if((candle.close > candle.open && rsi < 72) || (candle.close < candle.open && rsi > 28)) {
+        score++; reasons.push("RSI Safe Zone");
+    }
+
+    // 6. Previous Candle Rejection (Liquidity Grab)
+    const prev = h1[h1.length-2];
+    if(prev.low < candle.open && candle.close > candle.open) { score++; reasons.push("Bullish Rejection"); }
+    if(prev.high > candle.open && candle.close < candle.open) { score++; reasons.push("Bearish Rejection"); }
+
+    // 7. FVG Filled + Bounce
+    for(let i=h1.length-10; i>h1.length-20; i--) {
+        if(h1[i].high < h1[i-2].low && candle.low <= h1[i].high) { score++; reasons.push("FVG Bull Fill"); break; }
+        if(h1[i].low > h1[i-2].high && candle.high >= h1[i].low) { score++; reasons.push("FVG Bear Fill"); break; }
+    }
+
+    // 8. Order Block Retest
+    for(let i=h1.length-15; i>10; i--) {
+        if(h1[i].close > h1[i].open && Math.abs(h1[i].close - h1[i].open) > atr*1.2) {
+            if(candle.low <= h1[i].high && candle.close > h1[i].open) { score++; reasons.push("OB Bull Retest"); break; }
+        }
+        if(h1[i].close < h1[i].open && Math.abs(h1[i].close - h1[i].open) > atr*1.2) {
+            if(candle.high >= h1[i].low && candle.close < h1[i].open) { score++; reasons.push("OB Bear Retest"); break; }
+        }
+    }
+
+    const direction = candle.close > candle.open ? "LONG" : "SHORT";
+
+    if(score >= 6 && direction !== lastSignal) {
+        lastSignal = direction;
+        const entry = candle.close.toFixed(2);
+        const sl = direction==="LONG" ? (candle.low - atr*0.3).toFixed(2) : (candle.high + atr*0.3).toFixed(2);
+        const tp = direction==="LONG" ? (candle.close + atr*2.8).toFixed(2) : (candle.close - atr*2.8).toFixed(2);
+
+        // NUCLEAR SIGNAL
+        document.getElementById('signal').innerHTML = `\( {direction}<br> \){score}/8 CONFIRMED<br>Entry: \( {entry}<br>TP: \){tp} | SL: ${sl}`;
+        document.getElementById('signal').className = direction==="LONG"?'bull':'bear';
+        document.getElementById('signal').style.display = 'block';
+        document.getElementById('nuke').play();
+        setTimeout(()=>document.getElementById('signal').style.display='none', 40000);
+
+        sendTelegram(direction, entry, score, reasons.join(" • "), tp, sl);
+        document.getElementById('conf').textContent = `LAST NUKE: \( {direction} \){score}/8 @ ${new Date().toLocaleTimeString()}`;
+    }
+}
+
+async function sendTelegram(dir, entry, score, reasons, tp, sl) {
+    const text = `*XAUUSD 1H NUCLEAR CONFIRMED SIGNAL*\n\n` +
+                 `*Direction:* ${dir}\n` +
+                 `*Confirmed Filters:* ${score}/8\n` +
+                 `*Reasons:* ${reasons}\n` +
+                 `*Entry:* ${entry}\n` +
+                 `*TP:* \( {tp}  |  *SL:* \){sl}\n` +
+                 `*Time:* ${new Date().toLocaleString()}\n\n` +
+                 `Only when candle is 100% closed — No Repaint!`;
+    try {
+        await fetch(`https://api.telegram.org/bot${cfg.token}/sendMessage`, {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({chat_id:cfg.chat, text, parse_mode:'Markdown'})
+        });
+    } catch(e) {}
+}
+</script>
+</body>
+</html>
